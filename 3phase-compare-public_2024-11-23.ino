@@ -2,11 +2,11 @@
 #include <soc/gpio_struct.h>
 // 200.1Hzまで
 #define DPHI_SIZE 2010  // 正弦波の周波数*10の値。速度に応じたsinの位相の変化量を格納する
-#define FREQ_SIZE 3000
+#define FREQ_SIZE 3000　// 三角波の最大周波数
+#define PHASE_FULL (1U << 31) // (2^31)位相の最大値 符号なし整数としている。
+#define PHASE_SIZE (1 << 11) // (2^11)正弦波の解像度
 float speed_max = 200;
 
-const uint32_t PHASE_FULL = pow(2, 31);  // 位相の最大値
-const uint32_t PHASE_SIZE = pow(2, 11);  // 正弦波の解像度
 // 正弦波pwm用のピン、制御ピン
 const uint8_t Pin_UH = 25, Pin_UL = 19, Pin_VH = 26, Pin_VL = 18, Pin_WH = 27, Pin_WL = 5, Pin_ctl = 32;
 
@@ -15,14 +15,12 @@ float sinValuesU_H[PHASE_SIZE];  // 三相の正弦波用配列の宣言
 float sinValuesV_H[PHASE_SIZE];
 float sinValuesW_H[PHASE_SIZE];
 
-int randomValue[PHASE_SIZE];
-
 hw_timer_t *timer1 = NULL;
 portMUX_TYPE timerMux0 = portMUX_INITIALIZER_UNLOCKED;
 const uint32_t timer_clk1 = 400000;  // 割り込み用タイマー1の周波数
 int interruptFreq = 20000;           // 割り込み周波数
 
-int sin_max = 512, tri_max = 2048;
+int sin_max = 0, tri_max = 2048;
 volatile int sync_mode = 0;  // 回転モード-0:非同期、1 : 1パルス、3 : 3パルス、5 : 5パルス、9 : 9パルスなど
 volatile float speed = 0;    // 正弦波の周波数
 volatile uint8_t accel = 0;
@@ -33,6 +31,9 @@ int dPhi_sin[DPHI_SIZE], dPhi_tri[FREQ_SIZE];  // 位相の変化量
 
 volatile boolean isStop = true; // 使ってない
 
+/*
+Functions start from here.
+*/
 
 // 割り込み関数
 void IRAM_ATTR onTimer1() {
@@ -45,7 +46,7 @@ void IRAM_ATTR onTimer1() {
 
     // モードの判定、三角波の位相上書き
     if (sync_mode == 1) { // 1パルスだけ流れる電流を減らすために比較する三角波をひっくり返していません。
-      tri_phase = (sin_phase * sync_mode) & (PHASE_FULL - 1);
+      tri_phase = sin_phase;
       // GPIO操作
       SwitchGPIO((float)sinValuesU_H[sin_phase >> 20] * sin_max, (float)triValue[tri_phase >> 20] * tri_max, Pin_UH);
       SwitchGPIO((float)sinValuesV_H[sin_phase >> 20] * sin_max, (float)triValue[tri_phase >> 20] * tri_max, Pin_VH);
@@ -58,9 +59,9 @@ void IRAM_ATTR onTimer1() {
       SwitchGPIO((float)sinValuesW_H[sin_phase >> 20] * sin_max, (float)-triValue[tri_phase >> 20] * tri_max, Pin_WH);
     } else { // 非同期モード
       // GPIO操作
-      SwitchGPIO((float)sinValuesU_H[sin_phase >> 20] * sin_max + randomValue[sin_phase >> 20], (float)-triValue[tri_phase >> 20] * tri_max, Pin_UH);
-      SwitchGPIO((float)sinValuesV_H[sin_phase >> 20] * sin_max + randomValue[sin_phase >> 20], (float)-triValue[tri_phase >> 20] * tri_max, Pin_VH);
-      SwitchGPIO((float)sinValuesW_H[sin_phase >> 20] * sin_max + randomValue[sin_phase >> 20], (float)-triValue[tri_phase >> 20] * tri_max, Pin_WH);
+      SwitchGPIO((float)sinValuesU_H[sin_phase >> 20] * sin_max, (float)-triValue[tri_phase >> 20] * tri_max, Pin_UH);
+      SwitchGPIO((float)sinValuesV_H[sin_phase >> 20] * sin_max, (float)-triValue[tri_phase >> 20] * tri_max, Pin_VH);
+      SwitchGPIO((float)sinValuesW_H[sin_phase >> 20] * sin_max, (float)-triValue[tri_phase >> 20] * tri_max, Pin_WH);
     }
   } else {
     StopPWM();
@@ -85,7 +86,6 @@ void setup() {
       valuefortri = (float)1.0 - valuefortri;
     }
     triValue[i] = (float)valuefortri;
-    randomValue[i] = random(-10, 10);
   }
 
   // 3相のsinの値用の配列の作成 // -0.5 ~ 0.5
